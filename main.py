@@ -71,29 +71,44 @@ async def cmd_start(message: types.Message):
 
 @dp.callback_query(F.data == "btn_create_session")
 async def start_auth(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("1️⃣ Введите ваш <b>API_ID</b> (можно получить на my.telegram.org):", parse_mode="HTML")
+    await callback.message.answer(
+        '<tg-emoji emoji-id="5794182096603847292">1️⃣</tg-emoji> Введите ваш <b>API_ID</b> (можно получить на my.telegram.org):', 
+        parse_mode="HTML"
+    )
     await state.set_state(AuthStates.waiting_for_api_id)
     await callback.answer()
 
 @dp.message(AuthStates.waiting_for_api_id)
 async def process_api_id(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("❌ API_ID должен состоять только из цифр. Введите корректный API_ID:")
+        await message.answer(
+            '<tg-emoji emoji-id="5954175920506933873">❌</tg-emoji> API_ID должен состоять только из цифр. Введите корректный API_ID:',
+            parse_mode="HTML"
+        )
         return
     await state.update_data(user_api_id=int(message.text.strip()))
-    await message.answer("2️⃣ Теперь введите ваш <b>API_HASH</b>:", parse_mode="HTML")
+    await message.answer(
+        '<tg-emoji emoji-id="5794303034292968945">2️⃣</tg-emoji> Теперь введите ваш <b>API_HASH</b>:', 
+        parse_mode="HTML"
+    )
     await state.set_state(AuthStates.waiting_for_api_hash)
 
 @dp.message(AuthStates.waiting_for_api_hash)
 async def process_api_hash(message: types.Message, state: FSMContext):
     await state.update_data(user_api_hash=message.text.strip())
-    await message.answer("3️⃣ Введите номер телефона аккаунта в международном формате (например, +79991234567):")
+    await message.answer(
+        '<tg-emoji emoji-id="5794031944547178894">3️⃣</tg-emoji> Введите номер телефона аккаунта в международном формате (например, +79991234567):',
+        parse_mode="HTML"
+    )
     await state.set_state(AuthStates.waiting_for_phone)
 
 @dp.message(AuthStates.waiting_for_phone)
 async def process_phone(message: types.Message, state: FSMContext):
     phone = message.text.strip().replace(" ", "")
-    await message.answer("⏳ Соединение с Telegram и отправка кода...")
+    await message.answer(
+        '<tg-emoji emoji-id="5900104897885376843">⏳</tg-emoji> Соединение с Telegram и отправка кода...',
+        parse_mode="HTML"
+    )
     
     data = await state.get_data()
     user_api_id = data.get("user_api_id")
