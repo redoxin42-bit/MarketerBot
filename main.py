@@ -13,28 +13,24 @@ import config
 import database as db
 import userbot_worker
 
-# Инициализация aiogram
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Временное хранилище запущенных сессий авторизации Pyrogram
-# Ключ: user_id, Значение: временный инстанс Client
 raw_clients = {}
 
-# Состояния FSM для добавления аккаунта
 class AuthStates(StatesGroup):
+    waiting_for_api_id = State()
+    waiting_for_api_hash = State()
     waiting_for_phone = State()
     waiting_for_code = State()
     waiting_for_2fa = State()
 
-# Состояния FSM для запуска рассылки
 class BroadcastStates(StatesGroup):
     waiting_for_text = State()
     waiting_for_chats = State()
 
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
-    # Конструктор кнопок с кастомными премиум-эмодзи
     builder.button(text="💻 Создать сессию", callback_data="btn_create_session")
     builder.button(text="🎛 Логи", callback_data="btn_view_logs")
     builder.button(text="⚡️ Рассылка", callback_data="btn_start_broadcast")
@@ -43,10 +39,9 @@ def get_main_keyboard():
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    _, status = db.get_session()
+    _, _, _, status = db.get_session()
     cooldown = db.get_cooldown()
     
-    # Текст приветствия с использованием HTML-тегов для кастомных премиум-эмодзи
     text = (
         '<tg-emoji emoji-id="5958376256788502078">⭐️</tg-emoji> <b>Добро пожаловать в Marketer Bot!</b>\n\n'
         'Бот нужен для рассылки сообщений.\n\n'
@@ -55,23 +50,40 @@ async def cmd_start(message: types.Message):
     )
     await message.answer(text=text, reply_markup=get_main_keyboard(), parse_mode="HTML")
 
-# --- КНОПКА: СОЗДАТЬ СЕССИЮ ---
 @dp.callback_query(F.data == "btn_create_session")
 async def start_auth(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("☎️ Введите номер телефона аккаунта для рассылки в международном формате (например, +79991234567):")
-    await state.set_state(AuthStates.waiting_for_phone)
+    await callback.message.answer("1️⃣ Введите ваш <b>API_ID</b> (можно получить на my.telegram.org):", parse_mode="HTML")
+    await state.set_state(AuthStates.waiting_for_api_id)
     await callback.answer()
+
+@dp.message(AuthStates.waiting_for_api_id)
+async def process_api_id(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("❌ API_ID должен состоять только из цифр. Введите корректный API_ID:")
+        return
+    await state.update_data(user_api_id=int(message.text.strip()))
+    await message.answer("2️⃣ Теперь введите ваш <b>API_HASH</b>:", parse_mode="HTML")
+    await state.set_state(AuthStates.waiting_for_api_hash)
+
+@dp.message(AuthStates.waiting_for_api_hash)
+async def process_api_hash(message: types.Message, state: FSMContext):
+    await state.update_data(user_api_hash=message.text.strip())
+    await message.answer("3️⃣ Введите номер телефона аккаунта в международном формате (например, +79991234567):")
+    await state.set_state(AuthStates.waiting_for_phone)
 
 @dp.message(AuthStates.waiting_for_phone)
 async def process_phone(message: types.Message, state: FSMContext):
     phone = message.text.strip().replace(" ", "")
-    await message.answer("⏳ Отправка запроса в Telegram...")
+    await message.answer("⏳ Соединение с Telegram и отправка кода...")
     
-    # Создаем временный клиент Pyrogram для авторизации
+    data = await state.get_data()
+    user_api_id = data.get("user_api_id")
+    user_api_hash = data.get("user_api_hash")
+    
     client = Client(
         f"temp_{message.from_user.id}",
-        api_id=config.API_ID,
-        api_hash=config.API_HASH,
+        api_id=user_api_id,
+        api_hash=user_api_hash,
         in_memory=True
     )
     await client.connect()
@@ -81,12 +93,14 @@ async def process_phone(message: types.Message, state: FSMContext):
         raw_clients[message.from_user.id] = {
             "client": client,
             "phone": phone,
+            "api_id": user_api_id,
+            "api_hash": user_api_hash,
             "phone_code_hash": code_info.phone_code_hash
         }
-        await message.answer("📩 Код подтверждения отправлен. Введите полученный код из приложения Telegram:")
+        await message.answer("📩 Код подтверждения отправлен. Введите код из приложения Telegram:")
         await state.set_state(AuthStates.waiting_for_code)
     except Exception as e:
-        await message.answer(f"❌ Ошибка отправки кода: {e}\nПопробуйте заново через /start")
+        await message.answer(f"❌ Ошибка: {e}\nПроверьте правильность API_ID/API_HASH и начните заново через /start")
         await client.disconnect()
         await state.clear()
 
@@ -94,7 +108,7 @@ async def process_phone(message: types.Message, state: FSMContext):
 async def process_code(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in raw_clients:
-        await message.answer("🚨 Ошибка контекста сессии. Начните заново через /start")
+        await message.answer("🚨 Ошибка контекста сессии. Пропишите /start")
         await state.clear()
         return
         
@@ -108,28 +122,28 @@ async def process_code(message: types.Message, state: FSMContext):
             phone_code_hash=user_data["phone_code_hash"],
             phone_code=code
         )
-        # Если вошли без 2FA
         session_str = await client.export_session_string()
-        db.save_session(user_data["phone"], session_str)
+        db.save_session(user_data["phone"], user_data["api_id"], user_data["api_hash"], session_str)
         db.add_log(f"👤 Аккаунт {user_data['phone']} успешно привязан.")
-        await message.answer("🎉 Авторизация успешна! Аккаунт подключен к движку рассыльщика.", reply_markup=get_main_keyboard())
+        
+        await message.answer("🎉 Авторизация успешна! Аккаунт со своими API ключами добавлен.", reply_markup=get_main_keyboard())
         await client.disconnect()
         raw_clients.pop(user_id, None)
         await state.clear()
         
     except SessionPasswordNeeded:
-        await message.answer("🔐 Ваш аккаунт защищен облачным паролем (2FA). Пожалуйста, введите ваш пароль:")
-        await state.set_state(AuthStates.waiting_for_2FA)
+        await message.answer("🔐 Аккаунт защищен 2FA. Введите ваш облачный пароль:")
+        await state.set_state(AuthStates.waiting_for_2fa)
         
     except PhoneCodeInvalid:
-        await message.answer("❌ Неверный код подтверждения. Введите код ещё раз:")
+        await message.answer("❌ Неверный код. Попробуйте ещё раз:")
 
 @dp.message(AuthStates.waiting_for_2fa)
 async def process_2fa(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_data = raw_clients.get(user_id)
     if not user_data:
-        await message.answer("🚨 Ошибка сессии. Пропишите /start")
+        await message.answer("🚨 Ошибка сессии. Начните заново с /start")
         await state.clear()
         return
 
@@ -139,31 +153,26 @@ async def process_2fa(message: types.Message, state: FSMContext):
     try:
         await client.check_password(password=password)
         session_str = await client.export_session_string()
-        db.save_session(user_data["phone"], session_str)
+        db.save_session(user_data["phone"], user_data["api_id"], user_data["api_hash"], session_str)
         db.add_log(f"👤 Аккаунт {user_data['phone']} успешно привязан с 2FA.")
-        await message.answer("🎉 Авторизация успешна! Аккаунт с 2FA успешно подключен.", reply_markup=get_main_keyboard())
+        
+        await message.answer("🎉 Авторизация успешна! Аккаунт с 2FA добавлен.", reply_markup=get_main_keyboard())
         await client.disconnect()
         raw_clients.pop(user_id, None)
         await state.clear()
     except PasswordHashInvalid:
-        await message.answer("❌ Неверный облачный пароль. Попробуйте ввести ещё раз:")
+        await message.answer("❌ Неверный облачный пароль. Попробуйте ещё раз:")
 
-# --- КНОПКА: ЛОГИ ---
 @dp.callback_query(F.data == "btn_view_logs")
 async def view_logs(callback: types.CallbackQuery):
     logs_list = db.get_logs(12)
-    if not logs_list:
-        logs_text = "📭 Логи пустые. Рассылка ещё не запускалась."
-    else:
-        logs_text = "<b>📋 Последние события системы:</b>\n\n" + "\n".join(logs_list)
-        
+    logs_text = "<b>📋 Последние события системы:</b>\n\n" + "\n".join(logs_list) if logs_list else "📭 Логи пустые."
     await callback.message.answer(logs_text, parse_mode="HTML")
     await callback.answer()
 
-# --- КНОПКА: РАССЫЛКА ---
 @dp.callback_query(F.data == "btn_start_broadcast")
 async def start_broadcast_init(callback: types.CallbackQuery, state: FSMContext):
-    session_str, _ = db.get_session()
+    session_str, _, _, _ = db.get_session()
     if not session_str:
         await callback.message.answer("🛑 Сначала необходимо авторизовать аккаунт через кнопку 'Создать сессию'!")
         await callback.answer()
@@ -176,7 +185,7 @@ async def start_broadcast_init(callback: types.CallbackQuery, state: FSMContext)
 @dp.message(BroadcastStates.waiting_for_text)
 async def process_broadcast_text(message: types.Message, state: FSMContext):
     await state.update_data(broadcast_text=message.text)
-    await message.answer("📂 Теперь отправьте список юзернеймов или ID чатов (каждый чат с новой строки, например @chat_username или -100123456):")
+    await message.answer("📂 Теперь отправьте список чатов (каждый чат с новой строки, например @username):")
     await state.set_state(BroadcastStates.waiting_for_chats)
 
 @dp.message(BroadcastStates.waiting_for_chats)
@@ -185,17 +194,15 @@ async def process_broadcast_chats(message: types.Message, state: FSMContext):
     state_data = await state.get_data()
     broadcast_text = state_data.get("broadcast_text")
     
-    await message.answer("🚀 Движок рассылки запущен в фоновом режиме. Вы можете следить за процессом в кнопке 'Логи'.")
+    await message.answer("🚀 Рассылка запущена в фоновом режиме. Чекайте кнопку 'Логи'.")
     await state.clear()
     
-    # Запускаем фоновую задачу рассылки, чтобы не вешать основного бота
     asyncio.create_task(userbot_worker.start_broadcast_task(broadcast_text, chats_data))
 
-# Запуск проекта
 async def main():
     logging.basicConfig(level=logging.INFO)
     db.init_db()
-    print("Marketer Bot успешно запущен и готов к работе!")
+    print("Marketer Bot успешно запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
