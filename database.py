@@ -15,12 +15,22 @@ def init_db():
         session_string TEXT,
         status TEXT DEFAULT '🔴 Не авторизован'
     )""")
+    
+    # ИСПРАВЛЕНО: Добавлено поле user_id для разделения логов
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
         timestamp TEXT,
         message TEXT
     )""")
+    
+    # Автоматическая миграция: добавляем колонку user_id, если БД уже существовала старой версии
+    try:
+        cursor.execute("ALTER TABLE logs ADD COLUMN user_id INTEGER")
+    except sqlite3.OperationalError:
+        pass  # Колонка уже создана
+        
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -30,18 +40,20 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_log(message: str):
+# ИСПРАВЛЕНО: Теперь метод принимает user_id
+def add_log(user_id: int, message: str):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     timestamp = datetime.now().strftime("%H:%M:%S")
-    cursor.execute("INSERT INTO logs (timestamp, message) VALUES (?, ?)", (timestamp, message))
+    cursor.execute("INSERT INTO logs (user_id, timestamp, message) VALUES (?, ?, ?)", (user_id, timestamp, message))
     conn.commit()
     conn.close()
 
-def get_logs(limit=10):
+# ИСПРАВЛЕНО: Теперь метод фильтрует логи по конкретному user_id
+def get_logs(user_id: int, limit=10):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT timestamp, message FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+    cursor.execute("SELECT timestamp, message FROM logs WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
     rows = cursor.fetchall()
     conn.close()
     return [f"[{r[0]}] {r[1]}" for r in rows]
@@ -63,12 +75,4 @@ def get_session():
     cursor.execute("SELECT session_string, api_id, api_hash, status FROM account_session LIMIT 1")
     row = cursor.fetchone()
     conn.close()
-    return row if row else (None, None, None, "🔴 Сессия не создана")
-
-def get_cooldown():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = 'cooldown'")
-    row = cursor.fetchone()
-    conn.close()
-    return int(row[0]) if row else 15
+    return row if row else (None, None, None, "🔴 Не авторизован")
