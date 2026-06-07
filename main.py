@@ -13,7 +13,7 @@ import config
 import database as db
 import userbot_worker
 
-bot = Bot(token=config.BOT_TOKEN)
+bot = Bot(token="7727553460:AAHWkV9Skzw9oQRDWV51P2OLe7m9-UaInV4")
 dp = Dispatcher(storage=MemoryStorage())
 
 raw_clients = {}
@@ -31,9 +31,23 @@ class BroadcastStates(StatesGroup):
 
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="💻 Создать сессию", callback_data="btn_create_session")
-    builder.button(text="🎛 Логи", callback_data="btn_view_logs")
-    builder.button(text="⚡️ Рассылка", callback_data="btn_start_broadcast")
+    builder.add(
+        types.InlineKeyboardButton(
+            text="💻 Создать сессию", 
+            callback_data="btn_create_session", 
+            icon_custom_emoji_id="5877530150345641603"
+        ),
+        types.InlineKeyboardButton(
+            text="🎛 Логи", 
+            callback_data="btn_view_logs", 
+            icon_custom_emoji_id="5877332341331857066"
+        ),
+        types.InlineKeyboardButton(
+            text="⚡️ Рассылка", 
+            callback_data="btn_start_broadcast", 
+            icon_custom_emoji_id="6005570495603282482"
+        )
+    )
     builder.adjust(2, 1)
     return builder.as_markup()
 
