@@ -31,8 +31,8 @@ class AuthStates(StatesGroup):
 class BroadcastStates(StatesGroup):
     waiting_for_text = State()
     waiting_for_tag_choice = State()
-    waiting_for_target_type = State()  # Выбор: по всем или по выбранным
-    waiting_for_chats = State()        # Ввод ID (если выбраны определенные чаты)
+    waiting_for_target_type = State()  
+    waiting_for_chats = State()        
     waiting_for_cooldown = State()
 
 def get_main_keyboard():
@@ -63,7 +63,6 @@ def get_target_choice_keyboard():
     builder.adjust(2)
     return builder.as_markup()
 
-# Кнопка отмены, которая появляется после успешного запуска
 def get_stop_keyboard():
     builder = InlineKeyboardBuilder()
     builder.add(
@@ -165,6 +164,13 @@ async def view_logs(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "btn_start_broadcast")
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    # ИСПРАВЛЕНО: Проверка наличия активной сессии перед запуском
+    session_string, _, _, _ = db.get_session()
+    if not session_string:
+        await callback.message.answer('<tg-emoji emoji-id="5954175920506933873">❌</tg-emoji> <b>Ошибка: Подключите сессию!</b> перед созданием рассылки.', parse_mode="HTML")
+        await callback.answer()
+        return
+
     await callback.message.answer('<tg-emoji emoji-id="5877396173135811032">⌨️</tg-emoji> Введите текст вашего рекламного сообщения:', parse_mode="HTML")
     await state.set_state(BroadcastStates.waiting_for_text)
     await callback.answer()
@@ -200,6 +206,46 @@ async def process_target_type(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(BroadcastStates.waiting_for_chats)
 async def process_chats(message: types.Message, state: FSMContext):
     raw_ids = [line.strip() for line in message.text.split("\n") if line.strip()]
+    if not raw_ids:
+        await message.answer("⚠️ Вы не ввели ни одного ID.")
+        return
+
+    status_msg = await message.answer('<tg-emoji emoji-id="5900104897885376843">⏳</tg-emoji> <b>Проверяю существование указанных чатов...</b>', parse_mode="HTML")
+    
+    session_string, api_id, api_hash, _ = db.get_session()
+    app = Client("validator_session", api_id=api_id, api_hash=api_hash, session_string=session_string, in_memory=True)
+    
+    invalid_chats = []
+    try:
+        await app.start()
+        for chat_item in raw_ids:
+            chat_target = chat_item
+            if chat_target.startswith("-100") or chat_target.isdigit() or (chat_target.startswith("-") and chat_target[1:].isdigit()):
+                chat_target = int(chat_target)
+            
+            try:
+                # Попытка получить информацию о чате для валидации его существования
+                await app.get_chat(chat_target)
+            except Exception:
+                invalid_chats.append(chat_item)
+        await app.stop()
+    except Exception as e:
+        await status_msg.delete()
+        await message.answer(f"❌ Критическая ошибка при валидации сессии: {e}")
+        return
+
+    await status_msg.delete()
+
+    # ИСПРАВЛЕНО: Если найдены некорректные ID / слова, выводим ошибку
+    if invalid_chats:
+        await message.answer(
+            f'<tg-emoji emoji-id="5954175920506933873">❌</tg-emoji> <b>Ошибка: Такого чата не существует</b> (или юзербот в нём не состоит):\n'
+            f'<code>' + ", ".join(invalid_chats) + '</code>\n\n'
+            f'Пожалуйста, введите список корректных ID заново:', 
+            parse_mode="HTML"
+        )
+        return
+
     await state.update_data(chats=raw_ids)
     await message.answer('<tg-emoji emoji-id="5900104897885376843">⏳</tg-emoji> Укажите время задержки (CoolDown) между чатами в секундах:', parse_mode="HTML")
     await state.set_state(BroadcastStates.waiting_for_cooldown)
@@ -212,7 +258,6 @@ async def process_cooldown(message: types.Message, state: FSMContext):
     cooldown_val = int(message.text)
     data = await state.get_data()
     
-    # Дополнительно передаем user_id, чтобы связать с ним фоновую задачу
     asyncio.create_task(
         userbot_worker.start_broadcast_task(
             message_text=data["text"], 
@@ -223,7 +268,6 @@ async def process_cooldown(message: types.Message, state: FSMContext):
         )
     )
     
-    # Выводим сообщение об успешном старте со специальной кнопкой отмены
     await message.answer(
         '<tg-emoji emoji-id="5825794181183836432">✔️</tg-emoji> Рассылка добавлена в очередь и успешно запущена!', 
         reply_markup=get_stop_keyboard(), 
@@ -231,10 +275,8 @@ async def process_cooldown(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# ОБРАБОТЧИК НАЖАТИЯ КНОПКИ ОСТАНОВКИ
 @dp.callback_query(F.data == "btn_stop_broadcast")
 async def stop_broadcast_handler(callback: types.CallbackQuery):
-    # Пытаемся отменить асинхронную задачу текущего пользователя
     was_stopped = userbot_worker.stop_broadcast_task(callback.from_user.id)
     
     if was_stopped:
