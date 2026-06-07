@@ -33,17 +33,17 @@ def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.add(
         types.InlineKeyboardButton(
-            text="💻 Создать сессию", 
+            text="Создать сессию", 
             callback_data="btn_create_session", 
             icon_custom_emoji_id="5877530150345641603"
         ),
         types.InlineKeyboardButton(
-            text="🎛 Логи", 
+            text="Логи", 
             callback_data="btn_view_logs", 
             icon_custom_emoji_id="5877332341331857066"
         ),
         types.InlineKeyboardButton(
-            text="⚡️ Рассылка", 
+            text="Рассылка", 
             callback_data="btn_start_broadcast", 
             icon_custom_emoji_id="6005570495603282482"
         )
@@ -56,10 +56,15 @@ async def cmd_start(message: types.Message):
     _, _, _, status = db.get_session()
     cooldown = db.get_cooldown()
     
+    if "Активна" in status:
+        status_html = '<tg-emoji emoji-id="5992199545151295755">🟢</tg-emoji> Активна'
+    else:
+        status_html = '<tg-emoji emoji-id="5877413297170419326">🔴</tg-emoji> Не авторизован'
+    
     text = (
         '<tg-emoji emoji-id="5958376256788502078">⭐️</tg-emoji> <b>Добро пожаловать в Marketer Bot!</b>\n\n'
         'Бот нужен для рассылки сообщений.\n\n'
-        f'<b>Статус:</b> {status}\n'
+        f'<b>Статус:</b> {status_html}\n'
         f'<b>Задержка (CoolDown):</b> {cooldown} сек.'
     )
     await message.answer(text=text, reply_markup=get_main_keyboard(), parse_mode="HTML")
@@ -180,7 +185,10 @@ async def process_2fa(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "btn_view_logs")
 async def view_logs(callback: types.CallbackQuery):
     logs_list = db.get_logs(12)
-    logs_text = "<b>📋 Последние события системы:</b>\n\n" + "\n".join(logs_list) if logs_list else "📭 Логи пустые."
+    if logs_list:
+        logs_text = "<b>📋 Последние события системы:</b>\n\n" + "\n".join(logs_list)
+    else:
+        logs_text = '<tg-emoji emoji-id="5881702736843511327">⚠️</tg-emoji> Логи пустые.'
     await callback.message.answer(logs_text, parse_mode="HTML")
     await callback.answer()
 
