@@ -6,34 +6,27 @@ DB_PATH = "marketer_db.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    # Таблица для хранения String Session юзербота
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS account_session (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT,
+        api_id INTEGER,
+        api_hash TEXT,
         session_string TEXT,
         status TEXT DEFAULT '🔴 Не авторизован'
     )""")
-    
-    # Таблица для логов работы
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp TEXT,
         message TEXT
     )""")
-    
-    # Таблица настроек (например, задержка)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
     )""")
-    
-    # Установка дефолтного кулдауна (15 секунд), если его нет
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cooldown', '15')")
-    
     conn.commit()
     conn.close()
 
@@ -53,28 +46,24 @@ def get_logs(limit=10):
     conn.close()
     return [f"[{r[0]}] {r[1]}" for r in rows]
 
-def save_session(phone: str, session_string: str):
+def save_session(phone: str, api_id: int, api_hash: str, session_string: str):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM account_session")  # Поддерживаем одну активную сессию
-    cursor.execute("INSERT INTO account_session (phone, session_string, status) VALUES (?, ?, '🟢 Активна')", (phone, session_string))
+    cursor.execute("DELETE FROM account_session")
+    cursor.execute(
+        "INSERT INTO account_session (phone, api_id, api_hash, session_string, status) VALUES (?, ?, ?, ?, '🟢 Активна')",
+        (phone, api_id, api_hash, session_string)
+    )
     conn.commit()
     conn.close()
 
 def get_session():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT session_string, status FROM account_session LIMIT 1")
+    cursor.execute("SELECT session_string, api_id, api_hash, status FROM account_session LIMIT 1")
     row = cursor.fetchone()
     conn.close()
-    return row if row else (None, "🔴 Сессия не создана")
-
-def update_cooldown(seconds: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE settings SET value = ? WHERE key = 'cooldown'", (str(seconds),))
-    conn.commit()
-    conn.close()
+    return row if row else (None, None, None, "🔴 Сессия не создана")
 
 def get_cooldown():
     conn = sqlite3.connect(DB_PATH)
