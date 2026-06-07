@@ -48,7 +48,6 @@ async def check_and_handle_op(client: Client, chat_id: str or int):
     return False
 
 async def start_broadcast_task(message_text: str, cooldown: int, target_type: str, chat_list: list = None, user_id: int = None):
-    # Регистрируем текущую выполняемую задачу в глобальном реестре
     if user_id:
         active_tasks[user_id] = asyncio.current_task()
 
@@ -113,18 +112,15 @@ async def start_broadcast_task(message_text: str, cooldown: int, target_type: st
             except Exception as e:
                 db.add_log(f"❌ Ошибка доставки в {target_chat}: {str(e)[:50]}")
 
-            # Задержка CoolDown (если задачу отменят кнопкой во время сна, код вызовет CancelledError)
             await asyncio.sleep(cooldown)
             
         db.add_log("🏁 Рассылка полностью завершена!")
         
     except asyncio.CancelledError:
-        # Ловим системный сигнал отмены и пишем в логи бота
         db.add_log("🛑 Процесс рассылки был принудительно прерван пользователем.")
     except Exception as general_error:
         db.add_log(f"🚨 Критический сбой движка рассылки: {general_error}")
     finally:
-        # Чистим за собой реестр задач и безусловно закрываем сессию юзербота
         if user_id:
             active_tasks.pop(user_id, None)
         try:
